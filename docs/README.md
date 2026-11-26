@@ -4,6 +4,13 @@ Marketly is a student e-commerce platform built to demonstrate software delivery
 
 **Payment is mock-only:** checkout can simulate success or failure. No real payment provider or card information is used.
 
+## Onboarding
+
+Run these commands to setup the repo structure:
+git clone https://github.com/DEPI-ecom/Marketly.git
+cd Marketly
+./bootstrap.sh
+
 ## Project scope
 
 Customer features:
