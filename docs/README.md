@@ -9,7 +9,9 @@ Marketly is a student e-commerce platform built to demonstrate software delivery
 Run these commands to setup the repo structure:
 
 git clone https://github.com/DEPI-ecom/Marketly.git
+
 cd Marketly
+
 ./bootstrap.sh
 
 ## Project scope
