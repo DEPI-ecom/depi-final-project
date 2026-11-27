@@ -1,26 +1,195 @@
+# Marketly: integrated local stack. Start everything with:  docker compose up --build
+
+x-service: &service
+  restart: unless-stopped
+  networks:
+    - marketly-net
+
+x-healthcheck: &healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
 services:
   postgres:
     image: postgres:17-alpine
     container_name: marketly-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_USER: marketly
-      POSTGRES_PASSWORD: marketly_dev_password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-marketly_dev_password}
       POSTGRES_DB: postgres
-
     ports:
-      - "5432:5432"
-
+      - "127.0.0.1:5432:5432" # local developer access only
     volumes:
       - marketly-postgres-data:/var/lib/postgresql/data
       - ./ecom-deploy/postgres/init-databases.sql:/docker-entrypoint-initdb.d/01-init-databases.sql:ro
-
+    networks:
+      - marketly-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U marketly -d postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  ecom-user:
+    <<: *service
+    build: ./ecom-user
+    env_file:
+      - path: ./ecom-user/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://marketly:${POSTGRES_PASSWORD:-marketly_dev_password}@postgres:5432/users_db
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-before-sharing}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  ecom-catalog:
+    <<: *service
+    build: ./ecom-catalog
+    env_file:
+      - path: ./ecom-catalog/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      DATABASE_URL: postgresql://marketly:${POSTGRES_PASSWORD:-marketly_dev_password}@postgres:5432/catalog_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  ecom-search:
+    <<: *service
+    build: ./ecom-search
+    env_file:
+      - path: ./ecom-search/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      CATALOG_SERVICE_URL: http://ecom-catalog:3002
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3003/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  ecom-cart:
+    <<: *service
+    build: ./ecom-cart
+    env_file:
+      - path: ./ecom-cart/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: postgresql://marketly:${POSTGRES_PASSWORD:-marketly_dev_password}@postgres:5432/cart_db
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-before-sharing}
+      CATALOG_SERVICE_URL: http://ecom-catalog:3002 # VERIFY name
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  ecom-order:
+    <<: *service
+    build: ./ecom-order
+    env_file:
+      - path: ./ecom-order/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      DATABASE_URL: postgresql://marketly:${POSTGRES_PASSWORD:-marketly_dev_password}@postgres:5432/orders_db
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-before-sharing}
+      USER_SERVICE_URL: http://ecom-user:3001 # VERIFY name
+      CATALOG_SERVICE_URL: http://ecom-catalog:3002 # VERIFY name
+      CART_SERVICE_URL: http://ecom-cart:3004 # VERIFY name
+      PAYMENT_SERVICE_URL: http://ecom-payment:3006 # VERIFY name
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  ecom-payment:
+    <<: *service
+    build: ./ecom-payment
+    env_file:
+      - path: ./ecom-payment/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      DATABASE_URL: postgresql://marketly:${POSTGRES_PASSWORD:-marketly_dev_password}@postgres:5432/payments_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  ecom-api-gateway:
+    <<: *service
+    build: ./ecom-api-gateway
+    env_file:
+      - path: ./ecom-api-gateway/.env.example
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      USER_SERVICE_URL: http://ecom-user:3001 # VERIFY name
+      CATALOG_SERVICE_URL: http://ecom-catalog:3002 # VERIFY name
+      SEARCH_SERVICE_URL: http://ecom-search:3003 # VERIFY name
+      CART_SERVICE_URL: http://ecom-cart:3004 # VERIFY name
+      ORDER_SERVICE_URL: http://ecom-order:3005 # VERIFY name
+      CORS_ORIGIN: http://localhost:5173 # VERIFY name (the frontend origin)
+    ports:
+      - "8080:8080"
+    depends_on:
+      ecom-user:
+        condition: service_healthy
+      ecom-catalog:
+        condition: service_healthy
+      ecom-search:
+        condition: service_healthy
+      ecom-cart:
+        condition: service_healthy
+      ecom-order:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+  # Uncomment when ecom-web exists (needs ecom-web/Dockerfile and nginx.conf, below).
+  # ecom-web:
+  #   <<: *service
+  #   build:
+  #     context: ./ecom-web
+  #     args:
+  #       VITE_API_BASE_URL: http://localhost:8080/api # VERIFY name
+  #   ports:
+  #     - "5173:8080"
+  #   depends_on:
+  #     ecom-api-gateway:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     <<: *healthcheck
+  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+
+networks:
+  marketly-net:
 
 volumes:
   marketly-postgres-data:
