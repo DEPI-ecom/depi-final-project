@@ -13,7 +13,7 @@ x-healthcheck: &healthcheck
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17.12-alpine
     container_name: marketly-postgres
     restart: unless-stopped
     environment:
@@ -58,6 +58,7 @@ services:
       - path: ./ecom-catalog/.env.example
         required: false
     environment:
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-before-sharing}
       NODE_ENV: production
       PORT: 3002
       DATABASE_URL: postgresql://marketly:${POSTGRES_PASSWORD:-marketly_dev_password}@postgres:5432/catalog_db
@@ -172,21 +173,21 @@ services:
       <<: *healthcheck
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
-  # Uncomment when ecom-web exists (needs ecom-web/Dockerfile and nginx.conf, below).
-  # ecom-web:
-  #   <<: *service
-  #   build:
-  #     context: ./ecom-web
-  #     args:
-  #       VITE_API_BASE_URL: http://localhost:8080/api # VERIFY name
-  #   ports:
-  #     - "5173:8080"
-  #   depends_on:
-  #     ecom-api-gateway:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     <<: *healthcheck
-  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+  ecom-web:
+    <<: *service
+    build:
+      context: ./ecom-web
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_DEFAULT_CURRENCY: USD
+    ports:
+      - "5173:8080"
+    depends_on:
+      ecom-api-gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
 
 networks:
   marketly-net:
